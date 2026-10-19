@@ -2,7 +2,7 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { accessSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import type { Readable } from "node:stream";
-import { type Rectangle, screen, systemPreferences } from "electron";
+import { type Point, type Rectangle, screen, systemPreferences } from "electron";
 import type {
 	CursorRecordingData,
 	CursorRecordingSample,
@@ -224,6 +224,8 @@ function normalizeCursorType(value: unknown): NativeCursorType | null {
 
 export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 	private samples: CursorRecordingSample[] = [];
+	// Global point behind each sample, kept so updateCaptureBounds can rebase it.
+	private samplePoints: Point[] = [];
 	private assets = new Map<string, NativeCursorAsset>();
 	private process: ChildProcessByStdio<null, Readable, Readable> | null = null;
 	private lineBuffer = "";
@@ -242,6 +244,7 @@ export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 
 	async start(): Promise<void> {
 		this.samples = [];
+		this.samplePoints = [];
 		this.assets.clear();
 		this.lineBuffer = "";
 		this.startTimeMs = this.options.startTimeMs ?? Date.now();
@@ -443,9 +446,26 @@ export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 			...(cursorType ? { cursorType } : {}),
 		});
 
+		this.samplePoints.push(cursor);
+
 		if (this.samples.length > this.options.maxSamples) {
 			this.samples.shift();
+			this.samplePoints.shift();
 		}
+	}
+
+	/** The helper's capture rect arrived: renormalise the samples taken against the seed frame. */
+	updateCaptureBounds(bounds: Rectangle) {
+		const width = Math.max(1, bounds.width);
+		const height = Math.max(1, bounds.height);
+		this.samples = this.samples.map((sample, index) => {
+			const point = this.samplePoints[index];
+			return {
+				...sample,
+				cx: clamp((point.x - bounds.x) / width, 0, 1),
+				cy: clamp((point.y - bounds.y) / height, 0, 1),
+			};
+		});
 	}
 
 	private waitUntilReady() {
