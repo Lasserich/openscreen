@@ -111,6 +111,23 @@ struct PickedSource {
 	/// Global frame (points, top-left origin) of what was picked, for cursor mapping.
 	let frame: CGRect
 	let displayId: CGDirectDisplayID?
+	/// Set for a window pick, so the take can re-read where that window is when it starts.
+	let windowId: CGWindowID?
+}
+
+/// Where the window server has a window right now: global points, top-left origin, the
+/// space Electron's cursor points are in. A window chosen in Apple's picker reports its
+/// SCWindow.frame and filter contentRect 46pt below this on macOS 26 (a zoomed Safari:
+/// y 80 vs 34), so the pointer drew above every click (#1130). Bounds need no TCC grant.
+func windowServerFrame(_ windowId: CGWindowID) -> CGRect? {
+	guard let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowId) as? [[String: Any]],
+		let bounds = info.first?[kCGWindowBounds as String] as? NSDictionary,
+		let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+		frame.width > 0, frame.height > 0
+	else {
+		return nil
+	}
+	return frame
 }
 
 @available(macOS 13.0, *)
@@ -624,7 +641,8 @@ final class ScreenCaptureRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 			filter: picked.filter,
 			width: size.width,
 			height: size.height,
-			captureFrame: captureContentFrame(for: picked.filter, fallback: picked.frame)
+			captureFrame: picked.windowId.flatMap(windowServerFrame)
+				?? captureContentFrame(for: picked.filter, fallback: picked.frame)
 		)
 	}
 
@@ -742,7 +760,8 @@ final class ScreenCaptureRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 				filter: filter,
 				width: size.width,
 				height: size.height,
-				captureFrame: captureContentFrame(for: filter, fallback: window.frame)
+				captureFrame: windowServerFrame(windowId)
+					?? captureContentFrame(for: filter, fallback: window.frame)
 			)
 		default:
 			throw HelperError.invalidSourceType(request.source.type)

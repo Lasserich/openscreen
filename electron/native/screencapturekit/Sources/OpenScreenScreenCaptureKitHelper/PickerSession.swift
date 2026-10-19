@@ -150,9 +150,10 @@ final class PickerSession: NSObject, SCContentSharingPickerObserver, @unchecked 
 
 		let display = filter.includedDisplays.first
 		let window = filter.includedWindows.first
-		let frame = window?.frame ?? display?.frame ?? filter.contentRect
+		let frame = window.flatMap { windowServerFrame($0.windowID) } ?? window?.frame ?? display?.frame
+			?? filter.contentRect
 		let displayId = display?.displayID ?? Self.display(containing: frame)
-		picked = PickedSource(filter: filter, frame: frame, displayId: displayId)
+		picked = PickedSource(filter: filter, frame: frame, displayId: displayId, windowId: window?.windowID)
 
 		var event: [String: Any] = [
 			"event": "picker-selected",
